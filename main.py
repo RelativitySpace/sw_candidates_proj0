@@ -1,52 +1,69 @@
-import numpy as np
 import cv2
-from matplotlib import pyplot as plt
+import numpy as np
+import csv
 
-img_path = r"C:\Users\Giovanni\Desktop\Desktop\Relativity Space\sw_candidates_proj0\images\weld.png"
+def measure_weld_width(image):
+    # Assuming the weld bead is a bright object on a dark background
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    img = cv2.adaptiveThreshold(gray,255,cv2.ADAPTIVE_THRESH_MEAN_C,\
+            cv2.THRESH_BINARY,11,2)
 
-def find_brightest_area(image_path):
-    # Read the image in grayscale
-    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    # Find contours in the binary image
+    contours, _ = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    # Find the column index with the maximum sum (brightest area)
-    column_sums = np.sum(img, axis=0)
-    brightest_column = np.argmax(column_sums)
+    # Assuming there is only one weld bead in the frame
+    if contours:
+        # Get the bounding rectangle of the weld bead
+        x, y, w, h = cv2.boundingRect(contours[0])
 
-    # Crop the image to keep everything to the right of the brightest area
-    img_cropped = img[:, brightest_column:]
+        # Draw a rectangle around the weld bead
+        cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
-    return img_cropped
+        return w
 
-def extract_width():
+    return None
 
-    img = find_brightest_area(img_path)
-    edges = cv2.Canny(img, 15, 30)
+def process_video(video_path, output_csv):
+    cap = cv2.VideoCapture(video_path)
 
-    lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=100, maxLineGap=1000)
+    # Get video properties
+    fps = cap.get(cv2.CAP_PROP_FPS)
 
-    # Filter lines based on y-coordinate range
-    y_range = (150, 275)
-    filtered_lines = [line[0] for line in lines if y_range[0] <= line[0][1] <= y_range[1]]
+    # Open output CSV file
+    with open(output_csv, 'w', newline='') as csvfile:
+        csv_writer = csv.writer(csvfile)
+        csv_writer.writerow(['Time', 'Weld Width'])
 
-    # Define slope threshold for considering a line as straight
-    slope_threshold = 0.001  # You may adjust this value based on your requirements
+        # Process each frame
+        while True:
+            ret, frame = cap.read()
 
-    # Create a blank image to draw the connected straight lines
-    img_connected = np.zeros_like(img)
+            if not ret:
+                break
 
-    for line in filtered_lines:
-        x1, y1, x2, y2 = line
+            # Measure weld width using contour detection
+            weld_width = measure_weld_width(frame)
 
-        # Calculate the slope of the line
-        slope = (y2 - y1) / (x2 - x1 + 1e-6)  # Adding a small value to avoid division by zero
+            # Write time and weld width to CSV
+            time = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
+            csv_writer.writerow([time, weld_width])
 
-        # Check if the slope is within the specified threshold
-        if abs(slope) < slope_threshold:
-            cv2.line(img_connected, (x1, y1), (x2, y2), (255, 0, 0), 1)
+            # Display the frame with the bead highlighted
+            cv2.imshow('Frame', frame)
 
-    plt.imshow(img_connected, cmap='gray')
-    plt.show()
+            # Break the loop if 'q' is pressed
+            if cv2.waitKey(50) & 0xFF == ord('q'):
+                break
 
+        # Release video capture and close CSV file
+        cap.release()
+        csvfile.close()
 
-extract_width()
+    cv2.destroyAllWindows()
+
+# Example usage
+video_file = r"C:\Users\Giovanni\Desktop\Desktop\Relativity Space\sw_candidates_proj0\videos\weld.mp4"
+output_csv_file = "weld_width_measurements.csv"
+
+process_video(video_file, output_csv_file)
 
